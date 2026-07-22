@@ -4,7 +4,6 @@ import {
   ExecutionContext,
   Injectable,
   ForbiddenException,
-  NotFoundException,
 } from '@nestjs/common';
 import { UserService } from '../../modules/users/application/user.service';
 import { Request } from 'express';
@@ -25,21 +24,14 @@ export class IsAdminGuard implements CanActivate {
     const { userType } = await this.usersService.findUserTypeByName('admin');
     if (!userType) throw new ForbiddenException(['Invalid user type']);
 
-    const { userProfile } = await this.usersService.findUserProfile(
-      user.id,
-      userType.id,
-      'admin',
-    );
-    if (!userProfile) throw new ForbiddenException(['Admin profile not found']);
-
-    const { admin } = await this.usersService.findAdmin(userProfile.id);
-    if (!admin) {
-      throw new NotFoundException([
-        'No such admin exists with this profile id',
-      ]);
+    // The role now lives directly on the users table.
+    if (user.user_type_id !== userType.id) {
+      throw new ForbiddenException(['Admin privileges required']);
     }
 
-    request.adminId = admin.id;
+    // adminId is now simply the user's own id — all account/journal data
+    // is scoped by this value.
+    request.adminId = user.id;
 
     return true;
   }

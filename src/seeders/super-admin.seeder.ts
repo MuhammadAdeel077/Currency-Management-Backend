@@ -2,14 +2,16 @@ import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidV4 } from 'uuid';
 import AppDataSource from '../../data-source';
-import { SuperAdminEntity } from '../modules/super-admin/domain/entities/super-admin.entity';
+import { UserEntity } from '../modules/users/domain/entities/user.entity';
+import { UserTypeEntity } from '../modules/users/domain/entities/user-type.entity';
 
 export class SuperAdminSeeder {
   public async run(dataSource: DataSource): Promise<void> {
-    const superAdminRepository = dataSource.getRepository(SuperAdminEntity);
+    const userRepository = dataSource.getRepository(UserEntity);
+    const userTypeRepository = dataSource.getRepository(UserTypeEntity);
 
     // Check if super admin already exists
-    const existingSuperAdmin = await superAdminRepository.findOne({
+    const existingSuperAdmin = await userRepository.findOne({
       where: { email: 'superadmin@dirham.com' },
     });
 
@@ -18,19 +20,32 @@ export class SuperAdminSeeder {
       return;
     }
 
-    // Create default super admin
-    const hashedPassword = await bcrypt.hash('SuperAdmin@123', 440);
+    // Ensure the superAdmin user type exists
+    let superAdminType = await userTypeRepository.findOne({
+      where: { name: 'superAdmin' },
+    });
+    if (!superAdminType) {
+      superAdminType = await userTypeRepository.save(
+        userTypeRepository.create({ id: uuidV4(), name: 'superAdmin' }),
+      );
+    }
 
-    const superAdmin = superAdminRepository.create({
+    // Create default super admin directly in the users table
+    const hashedPassword = await bcrypt.hash('SuperAdmin@123', 10);
+
+    const superAdmin = userRepository.create({
       id: uuidV4(),
       email: 'superadmin@dirham.com',
       password: hashedPassword,
       name: 'Super Administrator',
       phone: '+923001234567',
+      user_type_id: superAdminType.id,
+      type: 'superAdmin',
       is_active: true,
+      email_is_verified: true,
     });
 
-    await superAdminRepository.save(superAdmin);
+    await userRepository.save(superAdmin);
 
     console.log('✅ Super Admin seeded successfully!');
     console.log('📧 Email: superadmin@dirham.com');

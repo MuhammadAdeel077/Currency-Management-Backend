@@ -11,8 +11,8 @@ const seedUserTypes = async () => {
 
     const userTypes = [
       { name: 'superAdmin' },
-      { name: 'Admin' },
-      { name: 'User' },
+      { name: 'admin' },
+      { name: 'customer' },
     ];
 
     for (const type of userTypes) {

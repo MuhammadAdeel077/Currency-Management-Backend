@@ -4,41 +4,52 @@ import {
   ExecutionContext,
   UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { SuperAdminEntity } from '../../modules/super-admin/domain/entities/super-admin.entity';
+import { UserEntity } from '../../modules/users/domain/entities/user.entity';
+import { UserTypeEntity } from '../../modules/users/domain/entities/user-type.entity';
 
 @Injectable()
 export class IsSuperAdminGuard implements CanActivate {
   constructor(
-    private readonly jwtService: JwtService,
-    @InjectRepository(SuperAdminEntity)
-    private superAdminRepository: Repository<SuperAdminEntity>,
+    @InjectRepository(UserEntity)
+    private userRepository: Repository<UserEntity>,
+    @InjectRepository(UserTypeEntity)
+    private userTypeRepository: Repository<UserTypeEntity>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const user = request.user;
+    const tokenPayload = request.user;
 
-    if (!user) {
+    if (!tokenPayload) {
       throw new UnauthorizedException('User not authenticated');
     }
 
-    // Check if user has super-admin role
-    if (user.role !== 'super-admin') {
+    // Check if token carries the super-admin role
+    if (tokenPayload.role !== 'super-admin') {
       throw new UnauthorizedException(
         'Access denied. Super admin privileges required.',
       );
     }
 
-    // Verify super admin exists and is active
-    const superAdmin = await this.superAdminRepository.findOne({
-      where: { id: user.id },
+    // Super admins now live in the users table with a 'superAdmin' user type.
+    const superAdmin = await this.userRepository.findOne({
+      where: { id: tokenPayload.id },
     });
 
     if (!superAdmin) {
       throw new UnauthorizedException('Super admin not found');
+    }
+
+    const superAdminType = await this.userTypeRepository.findOne({
+      where: { name: 'superAdmin' },
+    });
+
+    if (!superAdminType || superAdmin.user_type_id !== superAdminType.id) {
+      throw new UnauthorizedException(
+        'Access denied. Super admin privileges required.',
+      );
     }
 
     if (!superAdmin.is_active) {

@@ -3,10 +3,7 @@ import { UserService } from './application/user.service';
 import { UserController } from './interface/user.controller';
 import { UserEntity } from './domain/entities/user.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AdminEntity } from './domain/entities/admin.entity';
-import { CustomerEntity } from './domain/entities/customer.entity';
 import { JwtService } from '@nestjs/jwt';
-import { UserProfileEntity } from './domain/entities/user-profiles.entity';
 import { UserTypeEntity } from './domain/entities/user-type.entity';
 import { CommonService } from '../../shared/modules/application/common.service';
 import { CommonController } from '../../shared/modules/interface/common.controller';
@@ -24,10 +21,7 @@ import { RedisService } from '../../shared/modules/redis/redis.service';
   imports: [
     TypeOrmModule.forFeature([
       UserEntity,
-      UserProfileEntity,
       UserTypeEntity,
-      AdminEntity,
-      CustomerEntity,
       CustomerAccountEntity,
       AddChqRefBankEntity,
       GeneralAccountEntity,

@@ -11,10 +11,7 @@ import { SalePurchaseController } from './interface/entry.controller';
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from '../users/application/user.service';
 import { UserEntity } from '../users/domain/entities/user.entity';
-import { UserProfileEntity } from '../users/domain/entities/user-profiles.entity';
 import { UserTypeEntity } from '../users/domain/entities/user-type.entity';
-import { AdminEntity } from '../users/domain/entities/admin.entity';
-import { CustomerEntity } from '../users/domain/entities/customer.entity';
 import { AddCurrencyEntity } from '../account/domain/entity/currency.entity';
 import { CurrencyRelationEntity } from './domain/entity/currencyRelation.entity';
 import { RedisService } from '../../shared/modules/redis/redis.service';
@@ -35,10 +32,7 @@ import { GeneralLedgerService } from '../journal/application/general-ledger.serv
       CurrencyAccountEntity,
       CustomerAccountEntity,
       UserEntity,
-      UserProfileEntity,
       UserTypeEntity,
-      AdminEntity,
-      CustomerEntity,
       AddCurrencyEntity,
       CurrencyRelationEntity,
       CurrencyStockEntity,

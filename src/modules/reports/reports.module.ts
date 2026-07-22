@@ -10,10 +10,7 @@ import { CustomerCurrencyEntryEntity } from '../currency/domain/entities/currenc
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from '../users/application/user.service';
 import { UserEntity } from '../users/domain/entities/user.entity';
-import { UserProfileEntity } from '../users/domain/entities/user-profiles.entity';
 import { UserTypeEntity } from '../users/domain/entities/user-type.entity';
-import { AdminEntity } from '../users/domain/entities/admin.entity';
-import { CustomerEntity } from '../users/domain/entities/customer.entity';
 import { CurrencyStockEntity } from '../currency/domain/entities/currency-stock.entity';
 import { AddCurrencyEntity } from '../account/domain/entity/currency.entity';
 import { JournalEntryEntity } from '../journal/domain/entity/journal-entry.entity';
@@ -37,10 +34,7 @@ import { ChqOutwardEntryEntity } from '../dashboard/domain/entity/chq-outward-en
       PurchaseEntryEntity,
       CustomerCurrencyEntryEntity,
       UserEntity,
-      UserProfileEntity,
       UserTypeEntity,
-      AdminEntity,
-      CustomerEntity,
       CurrencyStockEntity,
       AddCurrencyEntity,
       JournalEntryEntity,

@@ -3,18 +3,14 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-  Search,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UserEntity } from '../domain/entities/user.entity';
-import { ILike, Repository } from 'typeorm';
-import { AdminEntity } from '../domain/entities/admin.entity';
+import { Repository } from 'typeorm';
 import { IChangePassword, IUpdateProfile } from '../domain/types/user.types';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import bcrypt from 'bcrypt';
-import { UserProfileEntity } from '../domain/entities/user-profiles.entity';
 import { UserTypeEntity } from '../domain/entities/user-type.entity';
-import { CustomerEntity } from '../domain/entities/customer.entity';
 import { PaginatedUsersResponse } from '../../admin/domain/types/paginatedUserType';
 import { FilterUserDto } from '../../admin/domain/dtos/filter-user.dto';
 import { PaginationDto } from '../../../shared/modules/dtos/pagination.dto';
@@ -24,15 +20,8 @@ export class UserService {
   constructor(
     @InjectRepository(UserEntity)
     private userRepository: Repository<UserEntity>,
-    @InjectRepository(UserProfileEntity)
-    private userProfileRepository: Repository<UserProfileEntity>,
     @InjectRepository(UserTypeEntity)
     private userTypeEntity: Repository<UserTypeEntity>,
-
-    @InjectRepository(AdminEntity)
-    private adminRepository: Repository<AdminEntity>,
-    @InjectRepository(CustomerEntity)
-    private customerRepository: Repository<CustomerEntity>,
   ) {}
   async updateProfile(body: IUpdateProfile) {
     const user = await this.userRepository.findOneBy({
@@ -139,26 +128,6 @@ export class UserService {
     return { user };
   }
 
-  async findUserProfile(
-    userId: string,
-    user_type_id: string,
-    user_type_alias: string,
-  ) {
-    const userProfile = await this.userProfileRepository.findOneBy({
-      user_id: userId,
-      user_type_id: user_type_id,
-    });
-
-    if (!userProfile) {
-      throw new NotFoundException([
-        'No Matching Profile Id exists with this user Type Id for : ' +
-          user_type_alias,
-      ]);
-    }
-
-    return { userProfile };
-  }
-
   async findUserTypeByName(name: string) {
     const userType = await this.userTypeEntity.findOneBy({
       name: name,
@@ -173,50 +142,6 @@ export class UserService {
     return { userType };
   }
 
-  async findAdmin(user_profile_id: string) {
-    const admin = await this.adminRepository.findOne({
-      where: {
-        user_profile_id,
-      },
-      select: ['id', 'user_profile_id', 'type'],
-    });
-
-    if (!admin) {
-      throw new NotFoundException([
-        'Administrator profile not found. Please verify the profile ID.',
-      ]);
-    }
-
-    return { admin };
-  }
-
-  async findCustomerFromGenericUser(userId: string) {
-    const findUserProfile = await this.userRepository
-      .createQueryBuilder('u')
-      .leftJoin('user_profiles', 'up', 'u.id=up.user_id')
-      .leftJoin('customers', 'c', 'up.id=c.user_profile_id')
-      .where('u.id=:userId', { userId })
-      .getRawMany();
-
-    return findUserProfile;
-  }
-
-  async findCustomer(user_profile_id: string) {
-    const customer = await this.customerRepository.findOne({
-      where: {
-        user_profile_id,
-      },
-      select: ['id', 'user_profile_id'],
-    });
-
-    if (!customer) {
-      throw new NotFoundException([
-        'Customer profile not found. Please verify the profile ID.',
-      ]);
-    }
-
-    return { customer };
-  }
   async findUserBlockStatus(userId: string): Promise<boolean> {
     const findUser = await this.userRepository.findOne({
       where: { id: userId },
@@ -240,10 +165,10 @@ export class UserService {
     }
 
     if (status) {
-      if (status.toLowerCase() === 'active') {
-        query.andWhere('user.active_status = :active', { active: false });
-      } else if (status.toLowerCase() === 'blocked') {
+      if (status.toLowerCase() === 'blocked') {
         query.andWhere('user.block_status = :blocked', { blocked: true });
+      } else if (status.toLowerCase() === 'active') {
+        query.andWhere('user.block_status = :blocked', { blocked: false });
       }
     }
 
@@ -251,108 +176,39 @@ export class UserService {
     return users;
   }
 
-  async getAllCustomers(body: PaginationDto): Promise<PaginatedUsersResponse> {
+  // List users of a given type (e.g. all customers) directly from the
+  // users table now that profiles/admins/customers tables are gone.
+  async getUsersByType(
+    typeName: string,
+    body: PaginationDto,
+  ): Promise<PaginatedUsersResponse> {
     const { offset, limit } = body;
 
-    const query = this.customerRepository
-      .createQueryBuilder('customer')
-      .leftJoinAndSelect('customer.userProfile', 'userProfile')
-      .leftJoinAndSelect('userProfile.user', 'user')
+    const query = this.userRepository
+      .createQueryBuilder('user')
+      .leftJoin('user.userType', 'userType')
+      .where('userType.name = :typeName', { typeName })
       .select([
-        'customer.id',
-        'customer.loyaltyPoints',
-        'customer.defaultAddressId',
-        'customer.dateOfBirth',
-        'customer.preferences',
-        //profile col
-        'userProfile.id',
-        'userProfile.createdAt',
-
-        //user
         'user.id',
         'user.name',
         'user.email',
         'user.phone',
-        'user.profile',
-        'user.active_status',
+        'user.dateOfBirth',
         'user.block_status',
+        'user.account_balance',
+        'user.balance_in',
+        'user.createdAt',
       ])
       .skip((offset - 1) * limit)
       .take(limit);
 
-    const [customers, total] = await query.getManyAndCount();
+    const [data, total] = await query.getManyAndCount();
 
     return {
-      data: customers,
+      data,
       total,
       offset,
       limit,
     };
   }
-
-//   async getAllCustomersbyfilter(
-//     body: PaginationDto,
-//     AccountStatus?: string | null,
-//   ): Promise<PaginatedUsersResponse> {
-//     const { offset, limit } = body;
-
-//     let query = this.customerRepository
-//       .createQueryBuilder('customer')
-//       .leftJoinAndSelect('customer.userProfile', 'userProfile')
-//       .leftJoinAndSelect('userProfile.user', 'user');
-
-
-//     if (AccountStatus === 'Active') {
-//       query = query.andWhere('user.active_status = :active', { active: true });
-//       query = query.andWhere('user.block_status = :blocked', {
-//         blocked: false,
-//       });
-//     } else if (AccountStatus === 'Blocked') {
-//       query = query.andWhere('user.block_status = :blocked', { blocked: true });
-//     }
-
-//     query = query.skip((offset - 1) * limit).take(limit);
-
-//     const [customers, total] = await query.getManyAndCount();
-
-//     return {
-//       data: customers,
-//       total,
-//       offset,
-//       limit,
-//     };
-//   }
-
- 
-  async getAllUsers(offset: number, limit: number) {
-    
-    const data = await this.adminRepository
-  .createQueryBuilder('admin')
-  .leftJoin(UserProfileEntity, 'userProfile', 'userProfile.id = admin.user_profile_id')
-  .leftJoin(UserEntity, 'user', 'user.id = userProfile.user_id')
-  .select([
-    'admin.id AS admin_id',
-    'admin.type AS admin_type',
-    'userProfile.id AS profile_id',
-    'userProfile.user_type_id AS user_type_id',
-    'user.id AS user_id',
-    'user.name AS user_name',
-    'user.email AS user_email',
-    'user.phone AS user_phone',
-  ])
-  .getRawMany();
-    
-    const totalCount = await this.adminRepository.count();
-    const hasMore = offset + limit < totalCount;
-  
-    return {
-      total: totalCount,
-      offset,
-      limit,
-      hasMore,
-      data,
-    };
-  }
-   
-  
 }

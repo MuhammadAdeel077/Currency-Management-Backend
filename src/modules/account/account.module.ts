@@ -5,7 +5,6 @@ import { UserModule } from '../users/user.module';
 import AccountService from './application/account.service';
 import { AccountController } from './interface/account.controller';
 import { BankAccountEntity } from './domain/entity/bank-account.entity';
-import { CustomerEntity } from '../users/domain/entities/customer.entity';
 import { EmployeeAccountEntity } from './domain/entity/employee-account.entity';
 import { GeneralAccountEntity } from './domain/entity/general-account.entity';
 import { CustomerAccountEntity } from './domain/entity/customer-account.entity';
@@ -22,7 +21,6 @@ import { RedisService } from '../../shared/modules/redis/redis.service';
   imports: [
     TypeOrmModule.forFeature([
       BankAccountEntity,
-      CustomerEntity,
       EmployeeAccountEntity,
       GeneralAccountEntity,
       CustomerAccountEntity,

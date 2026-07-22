@@ -7,6 +7,7 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserEntity } from '../../users/domain/entities/user.entity';
@@ -14,9 +15,7 @@ import { Repository } from 'typeorm';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { v4 as uuidV4 } from 'uuid';
 import { UserTypeEntity } from '../../users/domain/entities/user-type.entity';
-import { AdminEntity } from '../../users/domain/entities/admin.entity';
 import AppDataSource from '../../../../data-source';
-import { UserProfileEntity } from '../../users/domain/entities/user-profiles.entity';
 import {
   ISignupFirstStep,
   ISignupSecondStep,
@@ -34,15 +33,41 @@ export class AuthService {
     private userRepository: Repository<UserEntity>,
     @InjectRepository(UserTypeEntity)
     private userTypeEntity: Repository<UserTypeEntity>,
-    @InjectRepository(UserProfileEntity)
-    private userProfileEntity: Repository<UserProfileEntity>,
-    @InjectRepository(AdminEntity) private adminEntity: Repository<AdminEntity>,
     @InjectDataSource(AppDataSource)
     private readonly dataSource: typeof AppDataSource,
     // private readonly mailService: MailService,
     @InjectRepository(OtpSignupEntity)
     private otpSignupEntity: Repository<OtpSignupEntity>,
   ) {}
+
+  private isBcryptHash(value: string): boolean {
+    return /^\$2[aby]\$\d{2}\$/.test(value);
+  }
+
+  private async validateAndUpgradePassword(
+    user: UserEntity,
+    plainPassword: string,
+  ): Promise<boolean> {
+    if (!user.password) {
+      return false;
+    }
+
+    if (this.isBcryptHash(user.password)) {
+      return bcrypt.compare(plainPassword, user.password);
+    }
+
+    const matchesLegacyPlaintext = plainPassword === user.password;
+    if (!matchesLegacyPlaintext) {
+      return false;
+    }
+
+    await this.userRepository.update(
+      { id: user.id },
+      { password: await bcrypt.hash(plainPassword, 10) },
+    );
+
+    return true;
+  }
 
   async checkPhoneExistence(phone: string) {
     const user = await this.userRepository.findOne({
@@ -151,10 +176,11 @@ export class AuthService {
       }
 
       const userId = uuidV4();
-      const mainTableId = uuidV4();
 
       const hashPassword = await bcrypt.hash(body.password, 10);
 
+      // All user data now lives directly on the users table with a
+      // user_type_id pointing at the user_types lookup.
       const user = await queryRunner.manager.getRepository(UserEntity).save({
         id: userId,
         email,
@@ -162,38 +188,9 @@ export class AuthService {
         password: hashPassword,
         phone: body.phone,
         email_is_verified: true,
+        user_type_id: userType.id,
+        type: userType.name,
       });
-
-      const profileTypeData = await queryRunner.manager
-        .getRepository(UserProfileEntity)
-        .save({
-          user_id: user.id,
-          user_type_id: userType.id,
-        });
-
-      switch (userType.name) {
-        case 'customer':
-          await queryRunner.manager.getRepository(UserEntity).save({
-            id: mainTableId,
-            user_profile_id: profileTypeData.id,
-            loyaltyPoints: 0,
-            preferences: {},
-          });
-          break;
-
-        case 'admin':
-          await queryRunner.manager.getRepository(AdminEntity).save({
-            id: mainTableId,
-            user_profile_id: profileTypeData.id,
-            type: 'admin',
-          });
-          break;
-
-        default:
-          throw new BadRequestException([
-            `Unsupported user type: ${userType.name}`,
-          ]);
-      }
 
       await queryRunner.commitTransaction();
 
@@ -215,7 +212,6 @@ export class AuthService {
       return {
         message: 'Signup completed successfully',
         user,
-        profileTypeData,
         accessToken,
       };
     } catch (err) {
@@ -237,14 +233,17 @@ export class AuthService {
     email: string;
     password: string
   }) {
+    const normalizedEmail = body.email.trim().toLowerCase();
+    const rawPassword = body.password;
+
     const user = await this.userRepository.findOne({
       where: {
-        email: body.email.toLowerCase(),
+        email: normalizedEmail,
       },
     });
 
     if (!user) {
-      throw new BadRequestException('Invalid email or password. Please check your credentials and try again.');
+      throw new UnauthorizedException('Invalid credentials. Please check your email and password.');
     }
 
     // Check if admin is blocked
@@ -252,40 +251,39 @@ export class AuthService {
       throw new ForbiddenException('Your account has been blocked. Please contact support for assistance.');
     }
 
-    const isMatch = await bcrypt.compare(body.password, user.password);
-    if (!isMatch) {
-      throw new BadRequestException('Invalid email or password. Please check your credentials and try again.');
+    // Guard accounts without a local password (e.g. social-only logins) so
+    // bcrypt never receives a null hash — that would surface as a 500.
+    if (!user.password) {
+      throw new UnauthorizedException('Invalid credentials. Please check your email and password.');
     }
 
-    // Check if user has admin, staff, or vendor profile
-    const adminProfiles = await this.userProfileEntity
-      .createQueryBuilder('user_profile')
-      .leftJoinAndSelect('user_profile.userType', 'user_types')
-      .where('user_profile.user_id = :userId', { userId: user.id })
-      .andWhere('user_types.name IN (:...types)', {
-        types: ['admin', 'customer', 'superAdmin'],
-      })
-      .getMany();
+    const isMatch = await this.validateAndUpgradePassword(user, rawPassword);
+    if (!isMatch) {
+      throw new UnauthorizedException('Invalid credentials. Please check your email and password.');
+    }
 
-    if (adminProfiles.length === 0) {
+    // The user's role now lives directly on the users table.
+    const userType = user.user_type_id
+      ? await this.userTypeEntity.findOneBy({ id: user.user_type_id })
+      : null;
+
+    const allowedTypes = ['admin', 'customer', 'superAdmin'];
+    if (!userType || !allowedTypes.includes(userType.name)) {
       throw new ForbiddenException(
         'Access denied. This account does not have administrative privileges.',
       );
     }
-    const mainTablesData: ({ data: AdminEntity } & { key: string })[] = [];
 
-    for (const profile of adminProfiles) {
-      const adminData = await this.adminEntity.findOneBy({
-        user_profile_id: profile.id,
-      });
-
-      if (adminData) {
-        mainTablesData.push({
-          key: profile.userType.name,
-          data: adminData,
-        });
-      }
-    }
+    const mainTablesData = [
+      {
+        key: userType.name,
+        data: {
+          id: user.id,
+          type: user.type,
+          user_type_id: user.user_type_id,
+        },
+      },
+    ];
 
     const accessToken = this.jwtService.sign(
       {
@@ -323,36 +321,28 @@ export class AuthService {
       throw new ForbiddenException('Your account has been blocked. Please contact support for assistance.');
     }
 
-    // Get admin profiles
-    const adminProfiles = await this.userProfileEntity
-      .createQueryBuilder('user_profile')
-      .leftJoinAndSelect('user_profile.userType', 'user_types')
-      .where('user_profile.user_id = :userId', { userId: user.id })
-      .andWhere('user_types.name IN (:...types)', {
-        types: ['admin', 'customer', 'superAdmin'],
-      })
-      .getMany();
+    // The user's role now lives directly on the users table.
+    const userType = user.user_type_id
+      ? await this.userTypeEntity.findOneBy({ id: user.user_type_id })
+      : null;
 
-    if (adminProfiles.length === 0) {
+    const allowedTypes = ['admin', 'customer', 'superAdmin'];
+    if (!userType || !allowedTypes.includes(userType.name)) {
       throw new ForbiddenException(
         'Access denied. This account does not have administrative privileges.',
       );
     }
 
-    const mainTablesData: ({ data: AdminEntity } & { key: string })[] = [];
-
-    for (const profile of adminProfiles) {
-      const adminData = await this.adminEntity.findOneBy({
-        user_profile_id: profile.id,
-      });
-
-      if (adminData) {
-        mainTablesData.push({
-          key: profile.userType.name,
-          data: adminData,
-        });
-      }
-    }
+    const mainTablesData = [
+      {
+        key: userType.name,
+        data: {
+          id: user.id,
+          type: user.type,
+          user_type_id: user.user_type_id,
+        },
+      },
+    ];
 
     return {
       id: user.id,

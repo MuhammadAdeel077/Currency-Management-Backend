@@ -6,15 +6,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, ILike, DataSource } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { v4 as uuidV4 } from 'uuid';
-import { SuperAdminEntity } from '../domain/entities/super-admin.entity';
 import { AdminPaymentEntity } from '../domain/entities/admin-payment.entity';
 import { UserEntity } from '../../users/domain/entities/user.entity';
-import { UserProfileEntity } from '../../users/domain/entities/user-profiles.entity';
-import { AdminEntity } from '../../users/domain/entities/admin.entity';
 import { UserTypeEntity } from '../../users/domain/entities/user-type.entity';
 import { SuperAdminLoginDto } from '../domain/dto/super-admin-login.dto';
 import { CreateAdminDto } from '../domain/dto/create-admin.dto';
@@ -31,21 +28,26 @@ import { PaymentStatus } from '../domain/entities/admin-payment.entity';
 @Injectable()
 export class SuperAdminService {
   constructor(
-    @InjectRepository(SuperAdminEntity)
-    private superAdminRepository: Repository<SuperAdminEntity>,
     @InjectRepository(AdminPaymentEntity)
     private adminPaymentRepository: Repository<AdminPaymentEntity>,
     @InjectRepository(UserEntity)
     private userRepository: Repository<UserEntity>,
-    @InjectRepository(UserProfileEntity)
-    private userProfileRepository: Repository<UserProfileEntity>,
-    @InjectRepository(AdminEntity)
-    private adminRepository: Repository<AdminEntity>,
     @InjectRepository(UserTypeEntity)
     private userTypeRepository: Repository<UserTypeEntity>,
     private readonly jwtService: JwtService,
     private readonly dataSource: DataSource,
   ) {}
+
+  // Get (or create) a user_type id by name.
+  private async getUserTypeId(name: string): Promise<string> {
+    let userType = await this.userTypeRepository.findOne({ where: { name } });
+    if (!userType) {
+      userType = await this.userTypeRepository.save(
+        this.userTypeRepository.create({ id: uuidV4(), name }),
+      );
+    }
+    return userType.id;
+  }
 
   // Seed Default Super Admin (runs on startup)
   async seedDefaultSuperAdmin(): Promise<void> {
@@ -56,7 +58,7 @@ export class SuperAdminService {
       const superAdminPhone = process.env.SUPER_ADMIN_PHONE || '+923001234567';
 
       // Check if super admin already exists
-      const existingSuperAdmin = await this.superAdminRepository.findOne({
+      const existingSuperAdmin = await this.userRepository.findOne({
         where: { email: superAdminEmail },
       });
 
@@ -65,19 +67,24 @@ export class SuperAdminService {
         return;
       }
 
+      const superAdminTypeId = await this.getUserTypeId('superAdmin');
+
       // Create default super admin
       const hashedPassword = await bcrypt.hash(superAdminPassword, 10);
 
-      const superAdmin = this.superAdminRepository.create({
+      const superAdmin = this.userRepository.create({
         id: uuidV4(),
         email: superAdminEmail,
         password: hashedPassword,
         name: superAdminName,
         phone: superAdminPhone,
+        user_type_id: superAdminTypeId,
+        type: 'superAdmin',
         is_active: true,
+        email_is_verified: true,
       });
 
-      await this.superAdminRepository.save(superAdmin);
+      await this.userRepository.save(superAdmin);
 
       console.log('✅ Super Admin seeded successfully!');
       console.log('📧 Email:', superAdminEmail);
@@ -91,11 +98,13 @@ export class SuperAdminService {
   async login(loginDto: SuperAdminLoginDto) {
     const { email, password } = loginDto;
 
-    const superAdmin = await this.superAdminRepository.findOne({
+    const superAdminTypeId = await this.getUserTypeId('superAdmin');
+
+    const superAdmin = await this.userRepository.findOne({
       where: { email: email.toLowerCase() },
     });
 
-    if (!superAdmin) {
+    if (!superAdmin || superAdmin.user_type_id !== superAdminTypeId) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -163,7 +172,7 @@ export class SuperAdminService {
         adminUserType = await queryRunner.manager.save(adminUserType);
       }
 
-      // Create user
+      // Create user — role and sub-type now live directly on the users table.
       const user = queryRunner.manager.create(UserEntity, {
         id: uuidV4(),
         email: email.toLowerCase(),
@@ -172,27 +181,11 @@ export class SuperAdminService {
         phone,
         email_is_verified: true,
         block_status: false,
+        user_type_id: adminUserType.id,
+        type: type || 'admin',
       });
 
       const savedUser = await queryRunner.manager.save(user);
-
-      // Create user profile with user_type_id
-      const userProfile = queryRunner.manager.create(UserProfileEntity, {
-        id: uuidV4(),
-        user_id: savedUser.id,
-        user_type_id: adminUserType.id,
-      });
-
-      const savedUserProfile = await queryRunner.manager.save(userProfile);
-
-      // Create admin
-      const admin = queryRunner.manager.create(AdminEntity, {
-        id: uuidV4(),
-        type: 'admin',
-        user_profile_id: savedUserProfile.id,
-      });
-
-      await queryRunner.manager.save(admin);
 
       // Commit transaction
       await queryRunner.commitTransaction();
@@ -230,11 +223,11 @@ export class SuperAdminService {
   async getAllAdmins(filterDto: FilterAdminsDto) {
     const { search, type, block_status, page = 1, limit = 10 } = filterDto;
 
+    const adminTypeId = await this.getUserTypeId('admin');
+
     const queryBuilder = this.userRepository
       .createQueryBuilder('user')
-      .leftJoinAndSelect('user_profiles', 'profile', 'profile.user_id = user.id')
-      .leftJoinAndSelect('admins', 'admin', 'admin.user_profile_id = profile.id')
-      .where('admin.id IS NOT NULL');
+      .where('user.user_type_id = :adminTypeId', { adminTypeId });
 
     if (search) {
       queryBuilder.andWhere(
@@ -244,7 +237,7 @@ export class SuperAdminService {
     }
 
     if (type) {
-      queryBuilder.andWhere('admin.type = :type', { type });
+      queryBuilder.andWhere('user.type = :type', { type });
     }
 
     if (block_status !== undefined) {
@@ -260,22 +253,10 @@ export class SuperAdminService {
 
     const adminsWithDetails = await Promise.all(
       users.map(async (user) => {
-        const profile = await this.userProfileRepository.findOne({
-          where: { user_id: user.id },
+        const payments = await this.adminPaymentRepository.find({
+          where: { admin_id: user.id },
+          order: { createdAt: 'DESC' },
         });
-
-        const admin = profile
-          ? await this.adminRepository.findOne({
-              where: { user_profile_id: profile.id },
-            })
-          : null;
-
-        const payments = admin
-          ? await this.adminPaymentRepository.find({
-              where: { admin_id: user.id },
-              order: { createdAt: 'DESC' },
-            })
-          : [];
 
         return {
           id: user.id,
@@ -284,7 +265,7 @@ export class SuperAdminService {
           phone: user.phone,
           password: user.password,
           block_status: user.block_status,
-          type: admin?.type,
+          type: user.type,
           payments: payments.map((p) => ({
             id: p.id,
             transaction_id: p.transaction_id,
@@ -320,22 +301,6 @@ export class SuperAdminService {
       throw new NotFoundException('Admin not found');
     }
 
-    const profile = await this.userProfileRepository.findOne({
-      where: { user_id: user.id },
-    });
-
-    if (!profile) {
-      throw new NotFoundException('Admin profile not found');
-    }
-
-    const admin = await this.adminRepository.findOne({
-      where: { user_profile_id: profile.id },
-    });
-
-    if (!admin) {
-      throw new NotFoundException('Admin not found');
-    }
-
     // Get payment info
     const payments = await this.adminPaymentRepository.find({
       where: { admin_id: user.id },
@@ -349,7 +314,7 @@ export class SuperAdminService {
       phone: user.phone,
       password: user.password,
       block_status: user.block_status,
-      type: admin.type,
+      type: user.type,
       account_balance: user.account_balance,
       balance_in: user.balance_in,
       email_is_verified: user.email_is_verified,
@@ -391,25 +356,12 @@ export class SuperAdminService {
       user.password = hashedPassword;
     }
 
-    await this.userRepository.save(user);
-
-    // Update admin type if provided
+    // Update admin sub-type if provided (now stored on the user row).
     if (updateDto.type) {
-      const profile = await this.userProfileRepository.findOne({
-        where: { user_id: user.id },
-      });
-
-      if (profile) {
-        const admin = await this.adminRepository.findOne({
-          where: { user_profile_id: profile.id },
-        });
-
-        if (admin) {
-          admin.type = updateDto.type;
-          await this.adminRepository.save(admin);
-        }
-      }
+      user.type = updateDto.type;
     }
+
+    await this.userRepository.save(user);
 
     return {
       message: 'Admin updated successfully',
@@ -433,27 +385,8 @@ export class SuperAdminService {
       throw new NotFoundException('Admin not found');
     }
 
-    const profile = await this.userProfileRepository.findOne({
-      where: { user_id: user.id },
-    });
-
-    if (profile) {
-      const admin = await this.adminRepository.findOne({
-        where: { user_profile_id: profile.id },
-      });
-
-      if (admin) {
-        // Delete payments first
-        await this.adminPaymentRepository.delete({ admin_id: adminId });
-        // Delete admin
-        await this.adminRepository.delete(admin.id);
-      }
-
-      // Delete profile
-      await this.userProfileRepository.delete(profile.id);
-    }
-
-    // Delete user
+    // Delete this admin's payments first, then the user row itself.
+    await this.adminPaymentRepository.delete({ admin_id: adminId });
     await this.userRepository.delete(user.id);
 
     return {
@@ -688,11 +621,15 @@ export class SuperAdminService {
   async getAllUsers(filterDto: FilterUsersDto) {
     const { search, block_status, page = 1, limit = 10 } = filterDto;
 
+    const adminTypeId = await this.getUserTypeId('admin');
+    const superAdminTypeId = await this.getUserTypeId('superAdmin');
+
     const queryBuilder = this.userRepository
       .createQueryBuilder('user')
-      .leftJoinAndSelect('user_profiles', 'profile', 'profile.user_id = user.id')
-      .leftJoinAndSelect('admins', 'admin', 'admin.user_profile_id = profile.id')
-      .where('admin.id IS NULL');
+      .where(
+        '(user.user_type_id IS NULL OR user.user_type_id NOT IN (:...privilegedTypes))',
+        { privilegedTypes: [adminTypeId, superAdminTypeId] },
+      );
 
     // Apply search filter
     if (search) {
@@ -747,15 +684,13 @@ export class SuperAdminService {
       throw new NotFoundException('User not found');
     }
 
-    const profile = await this.userProfileRepository.findOne({
-      where: { user_id: user.id },
-    });
-
     return {
       id: user.id,
       email: user.email,
       name: user.name,
       phone: user.phone,
+      type: user.type,
+      user_type_id: user.user_type_id,
       block_status: user.block_status,
       account_balance: user.account_balance,
       balance_in: user.balance_in,
@@ -763,12 +698,6 @@ export class SuperAdminService {
       last_login: user.last_login,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
-      profile: profile
-        ? {
-            id: profile.id,
-            user_id: profile.user_id,
-          }
-        : null,
     };
   }
 
@@ -824,20 +753,18 @@ export class SuperAdminService {
 
   // Get Dashboard Overview Stats
   async getDashboardStats() {
+    const adminTypeId = await this.getUserTypeId('admin');
+
     // Total admins count
     const totalAdmins = await this.userRepository
       .createQueryBuilder('user')
-      .leftJoin('user_profiles', 'profile', 'profile.user_id = user.id')
-      .leftJoin('admins', 'admin', 'admin.user_profile_id = profile.id')
-      .where('admin.id IS NOT NULL')
+      .where('user.user_type_id = :adminTypeId', { adminTypeId })
       .getCount();
 
     // Active admins (not blocked)
     const activeAdmins = await this.userRepository
       .createQueryBuilder('user')
-      .leftJoin('user_profiles', 'profile', 'profile.user_id = user.id')
-      .leftJoin('admins', 'admin', 'admin.user_profile_id = profile.id')
-      .where('admin.id IS NOT NULL')
+      .where('user.user_type_id = :adminTypeId', { adminTypeId })
       .andWhere('user.block_status = :status', { status: false })
       .getCount();
 
@@ -1136,12 +1063,12 @@ export class SuperAdminService {
   async getAdminPaymentBreakdown(statsDto: DashboardStatsDto) {
     const { page = 1, limit = 10 } = statsDto;
 
-    // Get all admins with their profiles
+    const adminTypeId = await this.getUserTypeId('admin');
+
+    // Get all admins directly from the users table.
     const adminsQuery = this.userRepository
       .createQueryBuilder('user')
-      .leftJoinAndSelect('user_profiles', 'profile', 'profile.user_id = user.id')
-      .leftJoinAndSelect('admins', 'admin', 'admin.user_profile_id = profile.id')
-      .where('admin.id IS NOT NULL')
+      .where('user.user_type_id = :adminTypeId', { adminTypeId })
       .skip((page - 1) * limit)
       .take(limit);
 

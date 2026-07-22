@@ -4,8 +4,22 @@ import sanitizeHtml from 'sanitize-html';
 
 @Injectable()
 export class GlobalSanitizerPipe implements PipeTransform {
+  private readonly sensitiveKeys = new Set([
+    'password',
+    'previous_password',
+    'new_password',
+    'confirm_password',
+    'sentOtp',
+    'otp',
+    'code',
+  ]);
+
   private sanitize(value: string): string {
     return sanitizeHtml(xss(value));
+  }
+
+  private shouldPreserveRawValue(key: string): boolean {
+    return this.sensitiveKeys.has(key);
   }
 
   transform(
@@ -30,7 +44,9 @@ export class GlobalSanitizerPipe implements PipeTransform {
     ) {
       for (const key in value) {
         if (typeof value[key] === 'string') {
-          value[key] = this.sanitize(value[key]);
+          value[key] = this.shouldPreserveRawValue(key)
+            ? value[key]
+            : this.sanitize(value[key]);
         } else if (typeof value[key] === 'object' && value[key] !== null) {
           value[key] = this.transform(value[key] as Record<string, unknown>); // recurse
         }

@@ -10,10 +10,7 @@ import { AddChqRefBankEntity } from '../account/domain/entity/add-chq-ref-bank.e
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from '../users/application/user.service';
 import { UserEntity } from '../users/domain/entities/user.entity';
-import { UserProfileEntity } from '../users/domain/entities/user-profiles.entity';
 import { UserTypeEntity } from '../users/domain/entities/user-type.entity';
-import { AdminEntity } from '../users/domain/entities/admin.entity';
-import { CustomerEntity } from '../users/domain/entities/customer.entity';
 import { ChqOutwardEntryEntity } from './domain/entity/chq-outward-entry.entity';
 import { BankAccountEntity } from '../account/domain/entity/bank-account.entity';
 import { SellingEntryEntity } from '../sale-purchase/domain/entity/selling_entries.entity';
@@ -37,10 +34,7 @@ import { RedisService } from '../../shared/modules/redis/redis.service';
       AddCurrencyEntity,
       AccountBalanceEntity,
       UserEntity,
-      UserProfileEntity,
       UserTypeEntity,
-      AdminEntity,
-      CustomerEntity,
     ]),
   ],
   controllers: [DashboardController, DashboardStatsController],

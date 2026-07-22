@@ -18,7 +18,6 @@ import {
 import { CustomerCurrencyEntryEntity } from '../domain/entities/currency-entry.entity';
 import { CreateMultipleCurrencyEntryDto } from '../domain/dto/multiple-currency-entry.dto';
 import { DailyBookDto } from '../domain/dto/daily-book.dto';
-import { AdminEntity } from '../../users/domain/entities/admin.entity';
 import { UserEntity } from '../../users/domain/entities/user.entity';
 import { AddCurrencyEntity } from '../../account/domain/entity/currency.entity';
 import { RedisService } from '../../../shared/modules/redis/redis.service';
@@ -28,9 +27,6 @@ import { JournalCurrencyEntryEntity } from '../domain/entities/create-currency-j
 @Injectable()
 export class CurrencyAccountService {
   constructor(
-    @InjectRepository(AdminEntity)
-    private readonly adminRepo: Repository<AdminEntity>,
-
     @InjectRepository(UserEntity)
     private readonly userRepo: Repository<UserEntity>,
 
@@ -160,19 +156,14 @@ export class CurrencyAccountService {
   }
 
   async getGenericUserId(adminId: string) {
-    const result = await this.adminRepo
-      .createQueryBuilder('admin')
-      .leftJoin(
-        'user_profiles',
-        'userProfiles',
-        'admin.user_profile_id = userProfiles.id',
-      )
-      .leftJoin('users', 'User', 'User.id = userProfiles.user_id')
-      .select('User.id', 'userId')
-      .where('admin.id = :adminId', { adminId })
-      .getRawOne();
+    // adminId is now the user's own id (roles live directly on the users
+    // table), so this simply verifies the user exists.
+    const user = await this.userRepo.findOne({
+      where: { id: adminId },
+      select: ['id'],
+    });
 
-    return result?.userId || null;
+    return user?.id || null;
   }
 
   async createCurrencyEntry(dto: CreateCurrencyEntryDto, adminId: string) {
@@ -229,7 +220,7 @@ export class CurrencyAccountService {
     dto: CreateCurrencyJournalEntryDto,
     adminId: string,
   ) {
-    const admin = await this.adminRepo.findOne({ where: { id: adminId } });
+    const admin = await this.userRepo.findOne({ where: { id: adminId } });
     if (!admin) {
       throw new NotFoundException('Admin not found');
     }

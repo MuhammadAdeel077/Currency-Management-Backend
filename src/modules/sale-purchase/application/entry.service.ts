@@ -17,8 +17,6 @@ import { UpdatePurchaseDto } from '../domain/dto/purchase-update.dto';
 import { UpdateSellingDto } from '../domain/dto/selling-update.dto';
 import { AddCurrencyEntity } from '../../account/domain/entity/currency.entity';
 import { UserEntity } from '../../users/domain/entities/user.entity';
-import { AdminEntity } from '../../users/domain/entities/admin.entity';
-import { UserProfileEntity } from '../../users/domain/entities/user-profiles.entity';
 import { CurrencyRelationEntity } from '../domain/entity/currencyRelation.entity';
 import { CurrencyPnlPreviewDto } from '../domain/dto/CurrencyPnlPreview.dto';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -56,12 +54,6 @@ export class SalePurchaseService {
 
     @InjectRepository(UserEntity)
     private userRepo: Repository<UserEntity>,
-
-    @InjectRepository(AdminEntity)
-    private adminRepo: Repository<AdminEntity>,
-
-    @InjectRepository(UserProfileEntity)
-    private userProfileRepo: Repository<UserProfileEntity>,
 
     @InjectRepository(CurrencyRelationEntity)
     private readonly currency_relation: Repository<CurrencyRelationEntity>,
@@ -586,20 +578,15 @@ export class SalePurchaseService {
 
   async createPurchase(dto: CreatePurchaseDto, adminId: string) {
     return await this.dataSource.transaction(async (manager) => {
-      const adminData = await this.adminRepo
-        .createQueryBuilder('a')
-        .leftJoin('user_profiles', 'up', 'up.id = a.user_profile_id')
-        .leftJoin('users', 'u', 'u.id = up.user_id')
-        .where('a.id = :adminId', { adminId })
-        .select(['a.id AS admin_id', 'up.id AS up_id', 'u.id AS u_id'])
-        .getRawOne();
+      // adminId is now the user's own id (roles live directly on the users
+      // table), so it doubles as the userId.
+      const userRecord = await this.userRepo.findOne({
+        where: { id: adminId },
+        select: ['id'],
+      });
+      if (!userRecord) throw new NotFoundException('User not found');
 
-      if (!adminData) throw new NotFoundException('Admin not found');
-      if (!adminData.up_id)
-        throw new NotFoundException('User profile not found');
-      if (!adminData.u_id) throw new NotFoundException('User not found');
-
-      const userId = adminData.u_id;
+      const userId = adminId;
 
       // Validate the account exists in one of three types
       const accountValidation = await this.validateAccountExists(
@@ -739,20 +726,15 @@ export class SalePurchaseService {
 
   async createSelling(dto: CreateSellingDto, adminId: string) {
     return await this.dataSource.transaction(async (manager) => {
-      const adminData = await this.adminRepo
-        .createQueryBuilder('a')
-        .leftJoin('user_profiles', 'up', 'up.id = a.user_profile_id')
-        .leftJoin('users', 'u', 'u.id = up.user_id')
-        .where('a.id = :adminId', { adminId })
-        .select(['a.id AS admin_id', 'up.id AS up_id', 'u.id AS u_id'])
-        .getRawOne();
+      // adminId is now the user's own id (roles live directly on the users
+      // table), so it doubles as the userId.
+      const userRecord = await this.userRepo.findOne({
+        where: { id: adminId },
+        select: ['id'],
+      });
+      if (!userRecord) throw new NotFoundException('User not found');
 
-      if (!adminData) throw new NotFoundException('Admin not found');
-      if (!adminData.up_id)
-        throw new NotFoundException('User profile not found');
-      if (!adminData.u_id) throw new NotFoundException('User not found');
-
-      const userId = adminData.u_id;
+      const userId = adminId;
 
       // Validate the account exists in one of three types
       const accountValidation = await this.validateAccountExists(
@@ -933,16 +915,15 @@ export class SalePurchaseService {
         throw new NotFoundException(`Purchase entry with ID "${entryId}" not found`);
       }
 
-      const adminData = await this.adminRepo
-        .createQueryBuilder('a')
-        .leftJoin('user_profiles', 'up', 'up.id = a.user_profile_id')
-        .leftJoin('users', 'u', 'u.id = up.user_id')
-        .where('a.id = :adminId', { adminId })
-        .select(['a.id AS admin_id', 'up.id AS up_id', 'u.id AS u_id'])
-        .getRawOne();
+      // adminId is now the user's own id (roles live directly on the users
+      // table), so it doubles as the userId.
+      const userRecord = await this.userRepo.findOne({
+        where: { id: adminId },
+        select: ['id'],
+      });
+      if (!userRecord) throw new NotFoundException('User not found');
 
-      if (!adminData) throw new NotFoundException('Admin not found');
-      const userId = adminData.u_id;
+      const userId = adminId;
 
       // Store old values for reversal
       const oldCurrencyId = entry.currencyDrId;
@@ -1134,16 +1115,15 @@ export class SalePurchaseService {
         throw new NotFoundException(`Selling entry with ID "${entryId}" not found`);
       }
 
-      const adminData = await this.adminRepo
-        .createQueryBuilder('a')
-        .leftJoin('user_profiles', 'up', 'up.id = a.user_profile_id')
-        .leftJoin('users', 'u', 'u.id = up.user_id')
-        .where('a.id = :adminId', { adminId })
-        .select(['a.id AS admin_id', 'up.id AS up_id', 'u.id AS u_id'])
-        .getRawOne();
+      // adminId is now the user's own id (roles live directly on the users
+      // table), so it doubles as the userId.
+      const userRecord = await this.userRepo.findOne({
+        where: { id: adminId },
+        select: ['id'],
+      });
+      if (!userRecord) throw new NotFoundException('User not found');
 
-      if (!adminData) throw new NotFoundException('Admin not found');
-      const userId = adminData.u_id;
+      const userId = adminId;
 
       // Store old values for reversal
       const oldCurrencyId = entry.fromCurrency.id;

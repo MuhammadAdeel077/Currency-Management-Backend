@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JournalEntryEntity } from './domain/entity/journal-entry.entity';
-import { CustomerEntity } from '../users/domain/entities/customer.entity';
 import { JournalService } from './application/jounal.service';
 import { BalanceCalculationService } from './application/balance-calculation.service';
 import { GeneralLedgerService } from './application/general-ledger.service';
@@ -24,9 +23,7 @@ import { CustomerAccountEntity } from '../account/domain/entity/customer-account
 import { JwtService } from '@nestjs/jwt';
 import { UserService } from '../users/application/user.service';
 import { UserEntity } from '../users/domain/entities/user.entity';
-import { UserProfileEntity } from '../users/domain/entities/user-profiles.entity';
 import { UserTypeEntity } from '../users/domain/entities/user-type.entity';
-import { AdminEntity } from '../users/domain/entities/admin.entity';
 import { BankAccountEntity } from '../account/domain/entity/bank-account.entity';
 import { GeneralAccountEntity } from '../account/domain/entity/general-account.entity';
 import { CurrencyStockEntity } from '../currency/domain/entities/currency-stock.entity';
@@ -37,7 +34,6 @@ import { PurchaseEntryEntity } from '../sale-purchase/domain/entity/purchase_ent
   imports: [
     TypeOrmModule.forFeature([
       JournalEntryEntity,
-      CustomerEntity,
       CashPaymentEntryEntity,
       CashReceivedEntryEntity,
       BankPaymentEntryEntity,
@@ -47,9 +43,7 @@ import { PurchaseEntryEntity } from '../sale-purchase/domain/entity/purchase_ent
       GeneralLedgerEntity,
       CustomerAccountEntity,
       UserEntity,
-      UserProfileEntity,
       UserTypeEntity,
-      AdminEntity,
       BankAccountEntity,
       GeneralAccountEntity,
       CurrencyStockEntity,

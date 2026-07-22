@@ -1,9 +1,7 @@
-import { CustomerEntity } from "../../../users/domain/entities/customer.entity";
+import { UserEntity } from '../../../users/domain/entities/user.entity';
 export interface PaginatedUsersResponse {
-    data: CustomerEntity[];
-    total: number;
-    offset: number;
-    limit: number;
-    
-  }
-  
+  data: UserEntity[];
+  total: number;
+  offset: number;
+  limit: number;
+}
