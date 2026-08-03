@@ -183,7 +183,7 @@ export class BalanceCalculationService {
     // Cash payments from bank
     const cashPayments = await this.cashPaymentRepository
       .createQueryBuilder('cp')
-      .where('cp.crAccount = :bankId', { bankId })
+      .where('cp.crAccountId = :bankId', { bankId })
       .andWhere('cp.adminId = :adminId', { adminId })
       .select('SUM(cp.amount)', 'total')
       .getRawOne();
@@ -192,7 +192,7 @@ export class BalanceCalculationService {
     // Cash received to bank
     const cashReceived = await this.cashReceivedRepository
       .createQueryBuilder('cr')
-      .where('cr.drAccount = :bankId', { bankId })
+      .where('cr.drAccountId = :bankId', { bankId })
       .andWhere('cr.adminId = :adminId', { adminId })
       .select('SUM(cr.amount)', 'total')
       .getRawOne();
@@ -494,14 +494,14 @@ export class BalanceCalculationService {
 
     const cashPayments = await this.cashPaymentRepository
       .createQueryBuilder('cp')
-      .where('cp.crAccount = :bankId', { bankId })
+      .where('cp.crAccountId = :bankId', { bankId })
       .andWhere('cp.adminId = :adminId', { adminId })
       .orderBy('cp.date', 'ASC')
       .getMany();
 
     const cashReceived = await this.cashReceivedRepository
       .createQueryBuilder('cr')
-      .where('cr.drAccount = :bankId', { bankId })
+      .where('cr.drAccountId = :bankId', { bankId })
       .andWhere('cr.adminId = :adminId', { adminId })
       .orderBy('cr.date', 'ASC')
       .getMany();

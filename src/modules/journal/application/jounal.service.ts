@@ -13,7 +13,10 @@ import { CreateCashPaymentEntryDto } from '../domain/dto/create-cash-payment-ent
 import { CashReceivedEntryEntity } from '../domain/entity/cash-received-entry.entity';
 import { CreateCashReceivedEntryDto } from '../domain/dto/create-cash-received-entry.dto';
 import { BankAccountEntity } from '../../account/domain/entity/bank-account.entity';
+import { GeneralAccountEntity } from '../../account/domain/entity/general-account.entity';
+import { AccountType } from '../../account/domain/enums/account-type.enum';
 import { GeneralLedgerService } from './general-ledger.service';
+import { ReportService } from '../../reports/application/report.service';
 
 @Injectable()
 export class JournalService {
@@ -39,9 +42,14 @@ export class JournalService {
     @InjectRepository(CashReceivedEntryEntity)
     private readonly cashReceivedRepo: Repository<CashReceivedEntryEntity>,
 
+    @InjectRepository(GeneralAccountEntity)
+    private readonly generalAccountRepo: Repository<GeneralAccountEntity>,
+
     private readonly dataSource: DataSource,
 
     private readonly generalLedgerService: GeneralLedgerService,
+
+    private readonly reportService: ReportService,
   ) {}
 
   async createJournalEntry(dto: CreateJournalEntryDto, adminId: string) {
@@ -102,6 +110,8 @@ export class JournalService {
         contraAccountName: crAccount.name,
       },
     ]);
+
+    await this.reportService.invalidateCachesAfterJournalEntry(adminId, dto.date);
 
     return savedEntry;
   }
@@ -175,6 +185,8 @@ export class JournalService {
       },
     ]);
 
+    await this.reportService.invalidateCachesAfterBankPaymentEntry(adminId, dto.date);
+
     return savedEntry;
   }
 
@@ -210,7 +222,43 @@ export class JournalService {
       adminId,
     });
 
-    return await this.bankReceiverRepo.save(entry);
+    const savedEntry = await this.bankReceiverRepo.save(entry);
+
+    // Log to General Ledger - Bank Receiver (Cr: Customer, Dr: Bank)
+    await this.generalLedgerService.createLedgerEntries([
+      {
+        adminId,
+        transactionDate: dto.date,
+        accountId: crAccount.id,
+        accountName: crAccount.name,
+        accountType: 'CUSTOMER',
+        entryType: 'BANK_RECEIPT',
+        sourceEntryId: savedEntry.id,
+        referenceNumber: dto.branchCode,
+        creditAmount: dto.amount,
+        debitAmount: 0,
+        contraAccountId: drAccount.id,
+        contraAccountName: drAccount.bankName,
+      },
+      {
+        adminId,
+        transactionDate: dto.date,
+        accountId: drAccount.id,
+        accountName: drAccount.bankName,
+        accountType: 'BANK',
+        entryType: 'BANK_RECEIPT',
+        sourceEntryId: savedEntry.id,
+        referenceNumber: dto.branchCode,
+        debitAmount: dto.amount,
+        creditAmount: 0,
+        contraAccountId: crAccount.id,
+        contraAccountName: crAccount.name,
+      },
+    ]);
+
+    await this.reportService.invalidateCachesAfterBankReceiverEntry(adminId, dto.date);
+
+    return savedEntry;
   }
 
   async getAllBankReceiverEntries(adminId: string) {
@@ -224,17 +272,24 @@ export class JournalService {
     dto: CreateCashPaymentEntryDto,
     adminId: string,
   ) {
+    const crAccount = await this.generalAccountRepo.findOne({
+      where: { id: dto.crAccountId },
+    });
     const drAccount = await this.accountsRepo.findOne({
       where: { id: dto.drAccountId },
     });
 
-    if (!drAccount) {
+    if (!drAccount || !crAccount) {
       throw new Error('Invalid account selected for credit or debit.');
+    }
+
+    if (crAccount.accountType !== AccountType.CASH) {
+      throw new Error('Credit account must be a Cash-type General Account.');
     }
 
     const entry = this.cashPaymentRepo.create({
       date: dto.date,
-      crAccount: dto.crAccount,
+      crAccount,
       drAccount,
       amount: dto.amount,
       description: dto.description,
@@ -243,8 +298,22 @@ export class JournalService {
 
     const savedEntry = await this.cashPaymentRepo.save(entry);
 
-    // Log to General Ledger - Cash payment (Dr: Customer, Cr: Cash)
+    // Log to General Ledger - Cash payment (Dr: Customer, Cr: Cash account)
     await this.generalLedgerService.createLedgerEntries([
+      {
+        adminId,
+        transactionDate: dto.date,
+        accountId: crAccount.id,
+        accountName: crAccount.name,
+        accountType: 'GENERAL',
+        entryType: 'CASH_PAYMENT',
+        sourceEntryId: savedEntry.id,
+        creditAmount: dto.amount,
+        debitAmount: 0,
+        description: dto.description,
+        contraAccountId: drAccount.id,
+        contraAccountName: drAccount.name,
+      },
       {
         adminId,
         transactionDate: dto.date,
@@ -256,9 +325,12 @@ export class JournalService {
         debitAmount: dto.amount,
         creditAmount: 0,
         description: dto.description,
-        contraAccountName: dto.crAccount || 'Cash',
+        contraAccountId: crAccount.id,
+        contraAccountName: crAccount.name,
       },
     ]);
+
+    await this.reportService.invalidateCachesAfterCashPaymentEntry(adminId, dto.date);
 
     return savedEntry;
   }
@@ -267,6 +339,7 @@ export class JournalService {
     return await this.cashPaymentRepo.find({
       where: { adminId },
       order: { date: 'DESC' },
+      relations: ['crAccount', 'drAccount'],
     });
   }
 
@@ -277,27 +350,71 @@ export class JournalService {
     const crAccount = await this.accountsRepo.findOne({
       where: { id: dto.crAccountId },
     });
+    const drAccount = await this.generalAccountRepo.findOne({
+      where: { id: dto.drAccountId },
+    });
 
-    if (!crAccount) {
+    if (!crAccount || !drAccount) {
       throw new Error('Invalid account selected for credit or debit.');
+    }
+
+    if (drAccount.accountType !== AccountType.CASH) {
+      throw new Error('Debit account must be a Cash-type General Account.');
     }
 
     const entry = this.cashReceivedRepo.create({
       date: dto.date,
       crAccount,
-      drAccount: dto.drAccount,
+      drAccount,
       amount: dto.amount,
       description: dto.description,
       adminId,
     });
 
-    return await this.cashReceivedRepo.save(entry);
+    const savedEntry = await this.cashReceivedRepo.save(entry);
+
+    // Log to General Ledger - Cash received (Dr: Cash account, Cr: Customer)
+    await this.generalLedgerService.createLedgerEntries([
+      {
+        adminId,
+        transactionDate: dto.date,
+        accountId: drAccount.id,
+        accountName: drAccount.name,
+        accountType: 'GENERAL',
+        entryType: 'CASH_RECEIPT',
+        sourceEntryId: savedEntry.id,
+        debitAmount: dto.amount,
+        creditAmount: 0,
+        description: dto.description,
+        contraAccountId: crAccount.id,
+        contraAccountName: crAccount.name,
+      },
+      {
+        adminId,
+        transactionDate: dto.date,
+        accountId: crAccount.id,
+        accountName: crAccount.name,
+        accountType: 'CUSTOMER',
+        entryType: 'CASH_RECEIPT',
+        sourceEntryId: savedEntry.id,
+        creditAmount: dto.amount,
+        debitAmount: 0,
+        description: dto.description,
+        contraAccountId: drAccount.id,
+        contraAccountName: drAccount.name,
+      },
+    ]);
+
+    await this.reportService.invalidateCachesAfterCashReceivedEntry(adminId, dto.date);
+
+    return savedEntry;
   }
 
   async getAllCashReceivedEntries(adminId: string) {
     return await this.cashReceivedRepo.find({
       where: { adminId },
       order: { date: 'DESC' },
+      relations: ['crAccount', 'drAccount'],
     });
   }
 
@@ -339,7 +456,11 @@ export class JournalService {
       }
 
       // Insert all journal entries in one go
-      return await manager.save(JournalEntryEntity, entriesToSave);
+      const saved = await manager.save(JournalEntryEntity, entriesToSave);
+
+      await this.reportService.invalidateCachesAfterJournalEntry(adminId);
+
+      return saved;
     });
   }
 

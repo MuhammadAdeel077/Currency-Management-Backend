@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { CustomerAccountEntity } from '../../../account/domain/entity/customer-account.entity';
+import { GeneralAccountEntity } from '../../../account/domain/entity/general-account.entity';
 
 @Entity('cash_payment_entries')
 export class CashPaymentEntryEntity {
@@ -9,8 +10,13 @@ export class CashPaymentEntryEntity {
   @Column({ type: 'date' })
   date: string;
 
-  @Column({type: 'varchar'})
-  crAccount: string;
+  // Credit Account (Cr) - Cash-type General Account
+  @ManyToOne(() => GeneralAccountEntity, { eager: true })
+  @JoinColumn({ name: 'crAccountId' })
+  crAccount: GeneralAccountEntity;
+
+  @Column({ name: 'legacy_cr_account', type: 'varchar', nullable: true })
+  legacyCrAccount?: string;
 
   @ManyToOne(() => CustomerAccountEntity, { eager: true })
   @JoinColumn({ name: 'drAccountId' })

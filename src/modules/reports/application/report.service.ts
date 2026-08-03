@@ -318,53 +318,45 @@ export class ReportService {
     return deleted;
   }
 
-  // New targeted invalidation helpers for journal entries
-  async invalidateCachesAfterBankPaymentEntry(adminId: string, date?: string): Promise<void> {
+  // Shared by every journal-family invalidation helper below: these entries never
+  // touch currency stocks/ledgers, but they always affect the daily book and both
+  // balance sheet reports, so every write path must clear all three.
+  private async invalidateJournalFamilyCaches(
+    adminId: string,
+    label: string,
+    date?: string,
+  ): Promise<void> {
     try {
       if (date) {
         await this.redisService.deleteKey(`dailyBooksReport:${adminId}:${date}`);
       } else {
         await this.redisService.deleteKeysByPattern(`dailyBooksReport:${adminId}:*`);
       }
+      await this.redisService.deleteKeysByPattern(`balanceSheet:${adminId}:*`);
+      await this.redisService.deleteKeysByPattern(`detailedBalanceSheet:${adminId}:*`);
     } catch (e) {
-      this.logger.warn(`Cache invalidation (bank payment) failed: ${e?.message || e}`);
+      this.logger.warn(`Cache invalidation (${label}) failed: ${e?.message || e}`);
     }
+  }
+
+  async invalidateCachesAfterJournalEntry(adminId: string, date?: string): Promise<void> {
+    await this.invalidateJournalFamilyCaches(adminId, 'journal entry', date);
+  }
+
+  async invalidateCachesAfterBankPaymentEntry(adminId: string, date?: string): Promise<void> {
+    await this.invalidateJournalFamilyCaches(adminId, 'bank payment', date);
   }
 
   async invalidateCachesAfterBankReceiverEntry(adminId: string, date?: string): Promise<void> {
-    try {
-      if (date) {
-        await this.redisService.deleteKey(`dailyBooksReport:${adminId}:${date}`);
-      } else {
-        await this.redisService.deleteKeysByPattern(`dailyBooksReport:${adminId}:*`);
-      }
-    } catch (e) {
-      this.logger.warn(`Cache invalidation (bank receiver) failed: ${e?.message || e}`);
-    }
+    await this.invalidateJournalFamilyCaches(adminId, 'bank receiver', date);
   }
 
   async invalidateCachesAfterCashPaymentEntry(adminId: string, date?: string): Promise<void> {
-    try {
-      if (date) {
-        await this.redisService.deleteKey(`dailyBooksReport:${adminId}:${date}`);
-      } else {
-        await this.redisService.deleteKeysByPattern(`dailyBooksReport:${adminId}:*`);
-      }
-    } catch (e) {
-      this.logger.warn(`Cache invalidation (cash payment) failed: ${e?.message || e}`);
-    }
+    await this.invalidateJournalFamilyCaches(adminId, 'cash payment', date);
   }
 
   async invalidateCachesAfterCashReceivedEntry(adminId: string, date?: string): Promise<void> {
-    try {
-      if (date) {
-        await this.redisService.deleteKey(`dailyBooksReport:${adminId}:${date}`);
-      } else {
-        await this.redisService.deleteKeysByPattern(`dailyBooksReport:${adminId}:*`);
-      }
-    } catch (e) {
-      this.logger.warn(`Cache invalidation (cash received) failed: ${e?.message || e}`);
-    }
+    await this.invalidateJournalFamilyCaches(adminId, 'cash received', date);
   }
 
   async dailyBooksReport(adminId: string, date: string): Promise<any> {
@@ -392,6 +384,7 @@ export class ReportService {
         sellingEntries,
         purchaseEntries,
         currencyEntries,
+        journalEntries,
         bankPaymentEntries,
         bankReceiverEntries,
         cashPaymentEntries,
@@ -456,6 +449,26 @@ export class ReportService {
             .orderBy('ce.date', 'ASC')
             .take(1000)
             .getMany(),
+          // Journal entries (JV Payment / Cust-to-Cust Online / OK-JV)
+          this.journalEntryRepository
+            .createQueryBuilder('je')
+            .leftJoin('je.crAccount', 'crAcc')
+            .leftJoin('je.drAccount', 'drAcc')
+            .where('je.adminId = :adminId', { adminId })
+            .andWhere('je.date = :date', { date })
+            .select([
+              'je.id',
+              'je.date',
+              'je.paymentType',
+              'je.amount',
+              'je.description',
+              'je.chqNo',
+              'crAcc.name',
+              'drAcc.name',
+            ])
+            .orderBy('je.date', 'ASC')
+            .take(1000)
+            .getMany(),
           // Bank payment (Bank -> Customer)
           this.bankPaymentRepository
             .createQueryBuilder('bp')
@@ -498,6 +511,7 @@ export class ReportService {
           // Cash payment (Cash -> Customer)
           this.cashPaymentRepository
             .createQueryBuilder('cp')
+            .leftJoin('cp.crAccount', 'cashAcc')
             .leftJoin('cp.drAccount', 'cust')
             .where('cp.adminId = :adminId', { adminId })
             .andWhere('cp.date = :date', { date })
@@ -506,6 +520,7 @@ export class ReportService {
               'cp.date',
               'cp.amount',
               'cp.description',
+              'cashAcc.name',
               'cust.name',
             ])
             .orderBy('cp.date', 'ASC')
@@ -515,6 +530,7 @@ export class ReportService {
           this.cashReceivedRepository
             .createQueryBuilder('cr')
             .leftJoin('cr.crAccount', 'cust')
+            .leftJoin('cr.drAccount', 'cashAcc')
             .where('cr.adminId = :adminId', { adminId })
             .andWhere('cr.date = :date', { date })
             .select([
@@ -523,6 +539,7 @@ export class ReportService {
               'cr.amount',
               'cr.description',
               'cust.name',
+              'cashAcc.name',
             ])
             .orderBy('cr.date', 'ASC')
             .take(1000)
@@ -559,6 +576,7 @@ export class ReportService {
         sellingEntries: sellingEntries || [],
         purchaseEntries: purchaseEntries || [],
         currencyEntries: currencyEntries || [],
+        journalEntries: journalEntries || [],
         bankPaymentEntries: bankPaymentEntries || [],
         bankReceiverEntries: bankReceiverEntries || [],
         cashPaymentEntries: cashPaymentEntries || [],
@@ -570,6 +588,7 @@ export class ReportService {
           (sellingEntries?.length || 0) +
           (purchaseEntries?.length || 0) +
           (currencyEntries?.length || 0) +
+          (journalEntries?.length || 0) +
           (bankPaymentEntries?.length || 0) +
           (bankReceiverEntries?.length || 0) +
           (cashPaymentEntries?.length || 0) +

@@ -1,5 +1,6 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { CustomerAccountEntity } from '../../../account/domain/entity/customer-account.entity';
+import { GeneralAccountEntity } from '../../../account/domain/entity/general-account.entity';
 
 @Entity('cash_received_entries')
 export class CashReceivedEntryEntity {
@@ -13,8 +14,13 @@ export class CashReceivedEntryEntity {
   @JoinColumn({ name: 'crAccountId' })
   crAccount: CustomerAccountEntity;
 
-  @Column({type: 'varchar'})
-  drAccount: string;
+  // Debit Account (Dr) - Cash-type General Account
+  @ManyToOne(() => GeneralAccountEntity, { eager: true })
+  @JoinColumn({ name: 'drAccountId' })
+  drAccount: GeneralAccountEntity;
+
+  @Column({ name: 'legacy_dr_account', type: 'varchar', nullable: true })
+  legacyDrAccount?: string;
 
   @Column({ type: 'decimal',
     precision: 30,

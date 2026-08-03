@@ -8,6 +8,15 @@ import { LoggerService } from './modules/logger/logger.service';
 import { HttpExceptionFilter } from './shared/filters/http-exception.filter';
 import express from 'express';
 import { SuperAdminService } from './modules/super-admin/application/super-admin.service';
+import { types as pgTypes } from 'pg';
+
+// node-postgres parses plain DATE columns (OID 1082) as local-midnight JS Date
+// objects, so serializing them back to JSON shifts the calendar day by one
+// whenever this process's TZ isn't UTC (e.g. journal/sale/purchase entries
+// silently reporting the wrong date, or a future-dated entry appearing to
+// belong to the previous day). Keep DATE columns as the raw "YYYY-MM-DD"
+// string TypeORM/Postgres already gives us.
+pgTypes.setTypeParser(pgTypes.builtins.DATE, (value: string) => value);
 
 async function bootstrap() {
   const loggerService: LoggerService = new LoggerService();

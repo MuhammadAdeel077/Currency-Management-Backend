@@ -704,6 +704,9 @@ export class SalePurchaseService {
 
       await redis.del(`dailyBuyingReport:${adminId}:${dto.date}`);
 
+      await this.redisService.deleteKeysByPattern(`balanceSheet:${adminId}:*`);
+      await this.redisService.deleteKeysByPattern(`detailedBalanceSheet:${adminId}:*`);
+
       // Clear currency ledger cache
       await this.clearCurrencyLedgerCache(adminId, currency.id);
 
@@ -852,6 +855,9 @@ export class SalePurchaseService {
       const redis = this.redisService.getClient();
 
       await redis.del(`dailyBooksReport:${adminId}:${dto.date}`);
+
+      await this.redisService.deleteKeysByPattern(`balanceSheet:${adminId}:*`);
+      await this.redisService.deleteKeysByPattern(`detailedBalanceSheet:${adminId}:*`);
 
       // Clear currency ledger cache
       await this.clearCurrencyLedgerCache(adminId, currency.id);

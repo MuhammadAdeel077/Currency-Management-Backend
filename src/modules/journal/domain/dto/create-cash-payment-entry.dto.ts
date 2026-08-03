@@ -1,14 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateCashPaymentEntryDto {
   @ApiProperty({ example: '2025-10-26', description: 'Date of the transaction' })
   @IsNotEmpty()
   date: string;
 
-  @ApiProperty({ example: 'cr-account', description: 'Credit Account' })
-  @IsNotEmpty()
-  crAccount: string;
+  @ApiProperty({ example: 'uuid-of-cash-general-account', description: 'Credit Account (Cash-type General Account) ID' })
+  @IsUUID()
+  crAccountId: string;
 
   @ApiProperty({ example: 'dr-account-id', description: 'Debit Account (Banam) ID' })
   @IsNotEmpty()

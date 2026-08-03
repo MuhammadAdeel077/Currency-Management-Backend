@@ -15,6 +15,7 @@ import { AddCurrencyEntity } from '../../../modules/account/domain/entity/curren
 import { CustomerAccountEntity } from '../../../modules/account/domain/entity/customer-account.entity';
 import { EmployeeAccountEntity } from '../../../modules/account/domain/entity/employee-account.entity';
 import { GeneralAccountEntity } from '../../../modules/account/domain/entity/general-account.entity';
+import { AccountType } from '../../../modules/account/domain/enums/account-type.enum';
 import { CustomerCurrencyAccountEntity } from '../../../modules/currency/domain/entities/currencies-account.entity';
 import { Repository } from 'typeorm';
 import { RedisService } from '../redis/redis.service';
@@ -168,20 +169,70 @@ export class CommonService {
   }
 
   async getAllBankForDropdown(adminId: string) {
+    const cacheKey = `banks_${adminId}`;
+
+    const cached =
+      await this.redisService.getValue<
+        { label: string; value: string; accountNumber?: string }[]
+      >(cacheKey);
+    if (cached) {
+      console.log('✅ Cache HIT – returning cached banks');
+      return cached;
+    }
+
+    console.log('❌ Cache MISS – fetching from DB');
     try {
       const banks = await this.bankRepo.find({
         select: ['id', 'bankName', 'accountNumber'],
         order: { bankName: 'ASC' },
         where: { adminId },
       });
-      return banks.map((b) => ({
+      const result = banks.map((b) => ({
         label: b.bankName,
         value: b.id,
         accountNumber: b.accountNumber,
       }));
+
+      await this.redisService.setValue(cacheKey, result, 300);
+      return result;
     } catch (error) {
       throw new InternalServerErrorException(
         'Failed to load banks. Please try again later.',
+      );
+    }
+  }
+
+  async getGeneralAccountsByType(adminId: string, accountType: AccountType) {
+    const cacheKey = `general_accounts_${accountType}_${adminId}`;
+    console.log('🔍 Checking cache for key:', cacheKey);
+
+    const cached =
+      await this.redisService.getValue<{ label: string; value: string }[]>(cacheKey);
+    if (cached) {
+      console.log('✅ Cache HIT – returning cached general accounts');
+      return cached;
+    }
+
+    console.log('❌ Cache MISS – fetching from DB');
+    try {
+      const accounts = await this.generalRepo.find({
+        select: ['id', 'name'],
+        order: { name: 'ASC' },
+        where: { adminId, accountType },
+      });
+
+      const result = accounts.map((a) => ({
+        label: a.name,
+        value: a.id,
+      }));
+
+      await this.redisService.setValue(cacheKey, result, 300);
+      console.log('💾 Cache SET for key:', cacheKey);
+
+      return result;
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Failed to load general accounts. Please try again later.',
       );
     }
   }
@@ -437,15 +488,19 @@ export class CommonService {
         // Clear customers cache
         const key2 = `customers_${adminId}`;
         await this.redisService.deleteKey(key2);
-        
+
         // Clear customers and banks cache
         const key3 = `customers_banks_${adminId}`;
         await this.redisService.deleteKey(key3);
-        
+
         // Clear chq ref banks cache
         const key4 = `chq_ref_banks_${adminId}`;
         await this.redisService.deleteKey(key4);
-        
+
+        // Clear banks cache
+        const key5 = `banks_${adminId}`;
+        await this.redisService.deleteKey(key5);
+
         console.log(`🗑️  Cleared ${deleted1} cache entries + dropdown caches for adminId: ${adminId}`);
       } else {
         // Clear all account caches
@@ -453,8 +508,9 @@ export class CommonService {
         const deleted2 = await this.redisService.deleteKeysByPattern('customers_*');
         const deleted3 = await this.redisService.deleteKeysByPattern('customers_banks_*');
         const deleted4 = await this.redisService.deleteKeysByPattern('chq_ref_banks_*');
-        
-        const totalDeleted = deleted1 + deleted2 + deleted3 + deleted4;
+        const deleted5 = await this.redisService.deleteKeysByPattern('banks_*');
+
+        const totalDeleted = deleted1 + deleted2 + deleted3 + deleted4 + deleted5;
         console.log(`🗑️  Cleared ${totalDeleted} total account cache entries`);
       }
     } catch (error) {

@@ -54,6 +54,6 @@ import { ChqOutwardEntryEntity } from '../dashboard/domain/entity/chq-outward-en
   ],
   controllers: [ReportController],
   providers: [RedisService, ReportService, JwtService, UserService],
-  exports: [],
+  exports: [ReportService],
 })
 export class ReportsModule {}

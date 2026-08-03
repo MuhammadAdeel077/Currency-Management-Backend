@@ -50,12 +50,14 @@ export default class AccountService {
       ...dto,
       adminId,
     });
-    const redis = this.redisService.getClient();
-    
-      await redis.del(`customers_${adminId}*`);
-    return await this.customerAccountRepository.save(newAccount);
+    const savedAccount = await this.customerAccountRepository.save(newAccount);
 
+    // Invalidate every cached dropdown/list that includes customer accounts
+    await this.redisService.deleteKeysByPattern(`customers_${adminId}*`);
+    await this.redisService.deleteKey(`customers_banks_${adminId}`);
+    await this.redisService.deleteKey(`all_accounts_${adminId}`);
 
+    return savedAccount;
   }
 
   async findAllUserAccount(adminId: string, paginationDto: PaginationDto) {
@@ -75,7 +77,13 @@ export default class AccountService {
       ...dto,
       adminId,
     });
-    return await this.bankRepo.save(newAccount);
+    const savedAccount = await this.bankRepo.save(newAccount);
+
+    await this.redisService.deleteKey(`banks_${adminId}`);
+    await this.redisService.deleteKey(`customers_banks_${adminId}`);
+    await this.redisService.deleteKey(`all_accounts_${adminId}`);
+
+    return savedAccount;
   }
 
   async findAllBankAccount(adminId: string, paginationDto: PaginationDto) {
@@ -94,7 +102,11 @@ export default class AccountService {
       ...dto,
       adminId,
     });
-    return await this.generalAccountRepo.save(newAccount);
+    const savedAccount = await this.generalAccountRepo.save(newAccount);
+
+    await this.redisService.deleteKey(`general_accounts_${dto.accountType}_${adminId}`);
+
+    return savedAccount;
   }
 
   async getAllGeneralAccounts(adminId: string, paginationDto: PaginationDto) {

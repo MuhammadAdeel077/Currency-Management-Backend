@@ -4,6 +4,7 @@ import { ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../guards/jwt.guard';
 import { IsAdminGuard } from '../../guards/isAdmin.guard';
 import { Request } from 'express';
+import { AccountType } from '../../../modules/account/domain/enums/account-type.enum';
 
 @Controller('api/v1/customers')
 export class CommonController {
@@ -49,6 +50,22 @@ export class CommonController {
   @UseGuards(JwtAuthGuard, IsAdminGuard)
   async getRefBanks(@Req() req: Request) {
     return await this.customerService.getRefBanks(req.adminId);
+  }
+
+  @Get('general/:accountType/dropdown')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, IsAdminGuard)
+  async getGeneralAccountsByType(
+    @Req() req: Request,
+    @Param('accountType') accountType: string,
+  ) {
+    if (!Object.values(AccountType).includes(accountType as AccountType)) {
+      throw new BadRequestException('Invalid account type provided.');
+    }
+    return await this.customerService.getGeneralAccountsByType(
+      req.adminId,
+      accountType as AccountType,
+    );
   }
 
   @Get('accounts/all-dropdown')

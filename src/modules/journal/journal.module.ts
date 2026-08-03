@@ -29,9 +29,11 @@ import { GeneralAccountEntity } from '../account/domain/entity/general-account.e
 import { CurrencyStockEntity } from '../currency/domain/entities/currency-stock.entity';
 import { SellingEntryEntity } from '../sale-purchase/domain/entity/selling_entries.entity';
 import { PurchaseEntryEntity } from '../sale-purchase/domain/entity/purchase_entries.entity';
+import { ReportsModule } from '../reports/reports.module';
 
 @Module({
   imports: [
+    ReportsModule,
     TypeOrmModule.forFeature([
       JournalEntryEntity,
       CashPaymentEntryEntity,
